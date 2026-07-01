@@ -1,0 +1,24 @@
+# ============================================
+# 飞书任务引擎 + YouTube下载+微信视频号发布
+# Python 依赖清单
+# 安装: pip install -r requirements.txt
+# ============================================
+
+# --- 核心依赖（必装） ---
+
+opencv-python>=4.5.0          # 图像模板匹配（template_matcher.py）
+numpy>=1.20.0                 # 矩阵运算（template_matcher.py）
+pyautogui>=0.9.0              # 桌面自动化：鼠标点击、键盘输入（run_workflow.py）
+pyperclip>=1.8.0              # 剪贴板操作（run_workflow.py 中文粘贴）
+Pillow>=9.0.0                 # 图像处理 ImageGrab（run_workflow.py）
+psutil>=5.8.0                 # 进程信息查询（run_workflow.py）
+pywin32>=300                  # Windows 窗口管理 win32gui/win32con（run_workflow.py）
+
+# --- 功能模块（按需安装） ---
+
+playwright>=1.40.0            # 浏览器自动化，用于更新 YouTube cookies（update_cookies.py）
+                              # 安装后需执行: playwright install chromium
+
+# --- 外部工具（pip 也可安装，或单独下载 exe） ---
+# yt-dlp>=2024.0.0            # YouTube 视频下载引擎（若 pip 安装，优先于 exe）
+# imageio-ffmpeg>=0.4.0       # ffmpeg 二进制（若 pip 安装，自动提供 ffmpeg）

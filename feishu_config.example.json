@@ -1,0 +1,11 @@
+{
+    "默认聊天名称": "飞书CLI",
+    "默认身份": "bot",
+    "聊天列表": [
+        {
+            "名称": "飞书CLI",
+            "chat_id": "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "备注": "与飞书CLI机器人的单聊"
+        }
+    ]
+}

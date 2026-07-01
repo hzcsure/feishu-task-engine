@@ -1,0 +1,40 @@
+# ── 项目专有配置（含敏感信息） ──
+feishu_config.json
+yt_config.json
+tasks.json
+.publish_history.json
+
+# ── 认证与密钥 ──
+youtube_cookies.txt
+*.cookies.txt
+.browser_profile/
+
+# ── 下载产物（大文件） ──
+downloads/
+WeChatAppEx/*.mp4
+WeChatAppEx/*.webm
+WeChatAppEx/*.mkv
+
+# ── Python 缓存 ──
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── WorkBuddy 内部 ──
+.workbuddy/
+
+# ── Windows 系统文件 ──
+nul
+Thumbs.db
+*.log
+
+# ── 编辑器/IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── 环境文件 ──
+.env
+*.env.local
