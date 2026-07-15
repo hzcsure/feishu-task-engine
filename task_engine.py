@@ -421,6 +421,30 @@ def update_stage_status(task_id, stage_name, status, **extra):
     save_tasks(data)
 
 
+def _persist_carry_fields(task_id, context, keys):
+    """把 context 中需要在「阶段间 / 跨重试」保留的变量写回任务 fields，使其持久化。
+
+    典型场景：下载阶段后处理适配器捕获的 video_filename / video_stem。
+    重试时「下载视频」阶段若已是 success 会被整体跳过，其后处理适配器不再运行，
+    若不从持久化 fields 恢复，publish_prepare 只能回退到「按最新修改时间」查找，
+    一旦 downloads/ 存在多个视频就可能选错文件。
+    """
+    data = load_tasks()
+    task = data.get("tasks", {}).get(task_id)
+    if not task:
+        return
+    fields = task.setdefault("fields", {})
+    changed = False
+    for k in keys:
+        v = context.get(k)
+        if v not in (None, ""):
+            if fields.get(k) != v:
+                fields[k] = v
+                changed = True
+    if changed:
+        save_tasks(data)
+
+
 def execute_multi_stage(task_id, task, stages):
     """执行多阶段任务：依次执行每个阶段，调用适配器，阶段间通过 context 共享变量"""
     chat_id = task.get("chat_id", "")
@@ -434,6 +458,12 @@ def execute_multi_stage(task_id, task, stages):
         "fields": task.get("fields", {}),
         "type_config": task.get("type_config", {}),
     }
+
+    # 从持久化 fields 恢复跨重试共享的变量（重试时「下载视频」阶段被跳过，
+    # 其后处理适配器不会运行，故 video_filename / video_stem 需从 fields 取回）
+    for _k in ("video_filename", "video_stem"):
+        if _k in task.get("fields", {}):
+            context[_k] = task["fields"][_k]
 
     all_ok = True
     for stage in stages:
@@ -521,6 +551,9 @@ def execute_multi_stage(task_id, task, stages):
             all_ok = False
             if fail_strategy == "中止":
                 break
+
+        # 持久化跨阶段共享变量（video_filename/video_stem），供后续阶段及重试使用
+        _persist_carry_fields(task_id, context, ("video_filename", "video_stem"))
 
     # 汇总结果
     if all_ok:

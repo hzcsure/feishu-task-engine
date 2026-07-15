@@ -1,6 +1,7 @@
 # ── 项目专有配置（含敏感信息） ──
 feishu_config.json
 yt_config.json
+sn.json
 tasks.json
 .publish_history.json
 
@@ -9,11 +10,13 @@ youtube_cookies.txt
 *.cookies.txt
 .browser_profile/
 
-# ── 下载产物（大文件） ──
+# ── 下载产物 / 模板图片（本地专有，不入库） ──
 downloads/
-WeChatAppEx/*.mp4
-WeChatAppEx/*.webm
-WeChatAppEx/*.mkv
+WeChatAppEx/
+
+# ── 二维码解析运行产物 ──
+RC/frame.png
+RC/url.txt
 
 # ── Python 缓存 ──
 __pycache__/
