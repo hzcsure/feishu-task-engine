@@ -23,6 +23,28 @@ SCRIPT_DIR = Path(__file__).parent
 PROFILE_DIR = SCRIPT_DIR / ".browser_profile"        # Playwright浏览器配置目录
 COOKIES_FILE = SCRIPT_DIR / "youtube_cookies.txt"    # 输出的cookies文件
 YOUTUBE_URL = "https://www.youtube.com"
+
+def _load_proxy():
+    """从 yt_config.json 读取代理配置"""
+    config_path = SCRIPT_DIR / "yt_config.json"
+    if config_path.exists():
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            proxy_cfg = cfg.get("代理", {})
+            if proxy_cfg.get("启用", False):
+                proto = proxy_cfg.get("协议", "socks5")
+                host = proxy_cfg.get("地址", "")
+                port = proxy_cfg.get("端口", 1080)
+                if host:
+                    server = f"{proto}://{host}:{port}"
+                    print(f"使用代理: {server}")
+                    return {"server": server}
+        except Exception as e:
+            print(f"读取代理配置失败: {e}")
+    print("未启用代理（直连）")
+    return None
+
+PLAYWRIGHT_PROXY = _load_proxy()
 # ==============================
 
 
@@ -64,12 +86,15 @@ def run_setup():
     print("=" * 50)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
+        kwargs = dict(
             user_data_dir=str(PROFILE_DIR),
             headless=False,
             viewport={"width": 1280, "height": 720},
             args=["--disable-blink-features=AutomationControlled"],
         )
+        if PLAYWRIGHT_PROXY:
+            kwargs["proxy"] = PLAYWRIGHT_PROXY
+        browser = p.chromium.launch_persistent_context(**kwargs)
         page = browser.pages[0] if browser.pages else browser.new_page()
         page.goto(YOUTUBE_URL, wait_until="domcontentloaded")
 
@@ -109,12 +134,15 @@ def run_update(headless=True):
         sys.exit(1)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
+        kwargs = dict(
             user_data_dir=str(PROFILE_DIR),
             headless=headless,
             viewport={"width": 1280, "height": 720},
             args=["--disable-blink-features=AutomationControlled"],
         )
+        if PLAYWRIGHT_PROXY:
+            kwargs["proxy"] = PLAYWRIGHT_PROXY
+        browser = p.chromium.launch_persistent_context(**kwargs)
         page = browser.pages[0] if browser.pages else browser.new_page()
 
         print("正在访问YouTube刷新cookies...")
