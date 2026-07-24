@@ -19,6 +19,8 @@ pywin32>=300                  # Windows 窗口管理 win32gui/win32con（run_wor
 playwright>=1.40.0            # 浏览器自动化，用于更新 YouTube cookies（update_cookies.py）
                               # 安装后需执行: playwright install chromium
 
+PySocks>=1.7.0               # SOCKS 代理支持（yt-dlp --proxy socks5:// 依赖此包）
+
 # --- 外部工具（pip 也可安装，或单独下载 exe） ---
 # yt-dlp>=2024.0.0            # YouTube 视频下载引擎（若 pip 安装，优先于 exe）
 # imageio-ffmpeg>=0.4.0       # ffmpeg 二进制（若 pip 安装，自动提供 ffmpeg）
