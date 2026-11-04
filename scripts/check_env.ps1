@@ -25,6 +25,13 @@
 .PARAMETER Online
     额外做一次网络连通性探测（pypi / github / Chromium 镜像）。
 
+.PARAMETER NoPause
+    仅由 check-env.bat 使用：即使窗口会关闭也不停留（自动化 / 计划任务）。
+    本脚本自身从不暂停，直接调用时该参数无效果。
+
+.PARAMETER Pause
+    仅由 check-env.bat 使用：强制在结束时等待按键。同上，本脚本不处理。
+
 .EXAMPLE
     check-env.bat
 
@@ -39,7 +46,13 @@ param(
     [switch]$Json,
     [switch]$DryRun,
     [string]$PythonPath = "",
-    [switch]$Online
+    [switch]$Online,
+
+    # 下面两个开关只由 check-env.bat 消费（决定窗口是否停留），
+    # 在这里声明是为了让 bat 能原样转发参数而不触发 CmdletBinding 的
+    # "找不到参数" 报错。脚本本身不做任何暂停动作。
+    [switch]$NoPause,
+    [switch]$Pause
 )
 
 $ErrorActionPreference = 'Continue'

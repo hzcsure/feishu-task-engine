@@ -63,7 +63,9 @@ python -c "import sys;print(sys.executable)"
 > ```
 >
 > 输出 10 组 `OK / WARN / FAIL`，退出码 `0`=全通过、`1`=有 FAIL、`2`=只有 WARN。
-> 加 `-Json` 出机器可读结果，加 `-DryRun` 只列检查项，加 `-Online` 附带网络探测。
+> 加 `-Json` 出机器可读结果，加 `-DryRun` 只列检查项，加 `-Online` 附带网络探测，
+> 加 `-NoPause` 强制不暂停（计划任务 / CI）。双击运行时它会停在
+> `Press any key to close this window`，报告不会一闪而过。
 > 下面的手工命令仍然值得走一遍 —— 出问题时你能一眼定位是哪一层。
 
 ```bat

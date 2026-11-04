@@ -14,18 +14,33 @@ check-env.bat
 只读、不装任何东西、不改系统环境变量。它把本目录所有检查项跑一遍，输出 `OK / WARN / FAIL`，
 退出码 `0`=全部通过、`1`=有 FAIL、`2`=只有 WARN。
 
+窗口行为随启动方式自动切换，不需要额外操作：
+
+| 启动方式 | 结束后 |
+|---|---|
+| 双击 `check-env.bat` | **停在 `Press any key to close this window`**，报告不会一闪而过 |
+| 已打开的 cmd 窗口里敲脚本名 | 不暂停（窗口本来就留着） |
+| `-Json` / `-NoPause` | 不暂停（自动化、计划任务、CI 用这两个） |
+
+判定依据是 `%CMDCMDLINE%` 里是否出现脚本名 —— 双击时 cmd 以 `/c "<脚本全路径>"` 启动，脚本名必然在里面；
+在已有控制台里手动执行则只有解释器路径。
+
 | 参数 | 作用 |
 |---|---|
-| `-Json` | 输出 JSON（纯 ASCII 转义，任何代码页都能解析） |
+| `-Json` | 输出 JSON（纯 ASCII 转义，任何代码页都能解析）；隐含不暂停 |
 | `-DryRun` | 只列将要检查的项目，不执行外部命令 |
 | `-Online` | 额外探测 pypi / aliyun / github / Chromium 镜像连通性 |
 | `-PythonPath "C:\...\python.exe"` | 强制指定解释器（默认自动挑 3.12） |
+| `-NoPause` | 强制不暂停（计划任务、CI、从 PowerShell 调用时建议显式加上） |
+| `-Pause` | 强制暂停，即使在已有控制台里运行 |
 
 用法示例：
 
 ```bat
+check-env.bat
 check-env.bat -Json > env-report.json
 check-env.bat -Online
+check-env.bat -NoPause
 ```
 
 脚本本身：`check-env.bat`（入口，绕过 PowerShell 执行策略）+ `scripts/check_env.ps1`（逻辑）。
