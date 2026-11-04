@@ -56,6 +56,16 @@ python -c "import sys;print(sys.executable)"
 
 ## Step 1　静态自检（不联网、不写文件）
 
+> **偷懒路线**：Step 0~6 的检查项已封装成只读脚本，一条命令即可全查一遍：
+>
+> ```bat
+> check-env.bat
+> ```
+>
+> 输出 10 组 `OK / WARN / FAIL`，退出码 `0`=全通过、`1`=有 FAIL、`2`=只有 WARN。
+> 加 `-Json` 出机器可读结果，加 `-DryRun` 只列检查项，加 `-Online` 附带网络探测。
+> 下面的手工命令仍然值得走一遍 —— 出问题时你能一眼定位是哪一层。
+
 ```bat
 "%PY%" -c "import ast,glob,json;[ast.parse(open(f,encoding='utf-8').read()) for f in glob.glob('**/*.py',recursive=True)];[json.load(open(f,encoding='utf-8')) for f in glob.glob('*.json',recursive=False)];print('AST+JSON OK')"
 ```

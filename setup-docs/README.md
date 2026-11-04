@@ -3,11 +3,56 @@
 本目录记录 **Windows 10 + cmd.exe** 下把 `feishu-task-engine` 跑起来所需的全部前置条件、安装步骤与验证命令。
 所有命令均在真机 `cmd.exe` 中逐条执行验证，不是纸面推导。
 
+## 先跑一次一键体检
+
+不想逐条手工敲，在**仓库根目录**执行：
+
+```bat
+check-env.bat
+```
+
+只读、不装任何东西、不改系统环境变量。它把本目录所有检查项跑一遍，输出 `OK / WARN / FAIL`，
+退出码 `0`=全部通过、`1`=有 FAIL、`2`=只有 WARN。
+
+| 参数 | 作用 |
+|---|---|
+| `-Json` | 输出 JSON（纯 ASCII 转义，任何代码页都能解析） |
+| `-DryRun` | 只列将要检查的项目，不执行外部命令 |
+| `-Online` | 额外探测 pypi / aliyun / github / Chromium 镜像连通性 |
+| `-PythonPath "C:\...\python.exe"` | 强制指定解释器（默认自动挑 3.12） |
+
+用法示例：
+
+```bat
+check-env.bat -Json > env-report.json
+check-env.bat -Online
+```
+
+脚本本身：`check-env.bat`（入口，绕过 PowerShell 执行策略）+ `scripts/check_env.ps1`（逻辑）。
+体检通过后再按下表按需深挖。
+
 | 文档 | 解决什么问题 |
 |---|---|
 | [`01-验证步骤-CMD版.md`](./01-验证步骤-CMD版.md) | **主清单**。Step 0~6 逐步验证：解释器锚定 → 静态自检 → 依赖安装 → 飞书链路 → 配置 → 引擎冷启动 → 发布链路。含失败对照表（报错原文 → 原因 → 修法） |
 | [`02-chrome-win64-手工安装指引.md`](./02-chrome-win64-手工安装指引.md) | `playwright install chromium` 报 **403 AccessDenied**（地区限制）时，如何手工下载 `chrome-win64.zip` 并放进 Playwright 的目录结构使其生效 |
 | [`03-lark-cli-安装配置指引.md`](./03-lark-cli-安装配置指引.md) | `lark-cli` 未安装 / 未授权 / 机器人不在群里（`230002`）的完整处理路径，含安装位置选择、双身份授权、凭证存放位置 |
+
+## 体检覆盖的 10 组检查
+
+| 组 | 内容 |
+|---|---|
+| 1 系统与会话 | Windows 版本、是否交互式桌面 |
+| 2 解释器 | 候选清单、选定版本、PATH 首位是否一致 |
+| 3 Python 依赖 | 10 个包逐个查「已安装版本 + 能否 import」 |
+| 4 外部工具 | node / npm registry / yt-dlp / ffmpeg（走 `imageio_ffmpeg.get_ffmpeg_exe()`，不靠 PATH） |
+| 5 lark-cli | 三个查找顺位、版本、bot 与 user 双身份 |
+| 6 Chromium | 从 `browsers.json` 读期望版本，核对 `chrome.exe` + `INSTALLATION_COMPLETE` |
+| 7 配置文件 | `feishu_config.json`（真实会话数 / 默认聊天）、`yt_config.json` |
+| 8 cookies | `youtube_cookies.txt` 是否存在 |
+| 9 发布链路 | 11 张模板图、`WeChatAppEx` 目录、微信进程、主窗口、视频号助手窗口（`WeChatAppEx` 进程） |
+| 10 静态校验 | 全部 `.py` 语法 + 根目录 JSON 合法性 |
+
+必须人工的三项（微信登录、模板截屏、真机发布）脚本只报缺失，不代做。
 
 ## 三分钟速览：这个项目的前置依赖分五层
 
