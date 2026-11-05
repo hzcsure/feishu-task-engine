@@ -8,7 +8,8 @@ rem   2. [P1] 默认 3.12 路径不存在时，用 py 启动器兜底；
 rem   3. [P1] 仍失败时，自动枚举系统候选 Python 供用户选择；
 rem   4. [P1] 校验 requirements.txt 是否存在；
 rem   5. [P2] 启用延迟展开，errorlevel 在 if 前独立捕获；
-rem   6. [P2] 设置 UTF-8 代码页，避免中文输出乱码。
+rem   6. [P2] 设置 UTF-8 代码页，避免中文输出乱码；
+rem   7. 合并 setup.bat：新增 [4/4] 安装 Playwright Chromium。
 rem ============================================================
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
@@ -49,7 +50,7 @@ echo ============================================================
 echo.
 
 rem ---- 5. upgrade pip -----------------------------------------
-echo [1/3] Upgrade pip...
+echo [1/4] Upgrade pip...
 "%PY%" -m pip install --user --upgrade pip
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
@@ -59,7 +60,7 @@ if not "!RC!"=="0" (
 )
 
 rem ---- 6. install requirements.txt ----------------------------
-echo [2/3] Install requirements.txt (pywin32, pyautogui, pillow, psutil, opencv, etc.)...
+echo [2/4] Install requirements.txt (pywin32, pyautogui, pillow, psutil, opencv, etc.)...
 "%PY%" -m pip install --user -r "%~dp0requirements.txt"
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
@@ -69,11 +70,21 @@ if not "!RC!"=="0" (
 )
 
 rem ---- 7. install yt-dlp + ffmpeg -----------------------------
-echo [3/3] Install yt-dlp and ffmpeg binary...
+echo [3/4] Install yt-dlp and ffmpeg binary...
 "%PY%" -m pip install --user yt-dlp imageio-ffmpeg
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
     echo [WARN] yt-dlp / imageio-ffmpeg install failed ^(exit !RC!^), you can retry manually
+)
+
+rem ---- 8. install Playwright Chromium（用于更新 YouTube cookies）----
+echo [4/4] Install Playwright Chromium browser...
+echo   正在下载 Chromium 浏览器（约 200MB，首次较慢）...
+"%PY%" -m playwright install chromium
+set "RC=!errorlevel!"
+if not "!RC!"=="0" (
+    echo [WARN] Chromium 下载失败 ^(exit !RC!^)，可手动执行:
+    echo        "%PY%" -m playwright install chromium
 )
 
 echo.
@@ -82,9 +93,6 @@ echo  Done. Dependencies installed to user site-packages.
 echo.
 echo  Run scripts with the SAME python, e.g.:
 echo    "%PY%" run_workflow.py
-echo.
-echo  OPTIONAL (only needed for update_cookies.py):
-echo    "%PY%" -m playwright install chromium
 echo ============================================================
 echo.
 pause

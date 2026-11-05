@@ -207,7 +207,6 @@ feishu-task-engine/
 │
 ├── requirements.txt
 ├── install_deps.bat           # 一键安装依赖（用本机 CPython 3.12 + --user）
-├── setup.bat                  # 传统安装脚本
 ├── task_engine.bat            # 引擎启动脚本
 ├── feishu_chat.bat
 ├── update_cookies_batch.bat

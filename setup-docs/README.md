@@ -85,4 +85,4 @@ check-env.bat -NoPause
 ## 说明
 
 - 文档中的 `oc_…` / `cli_…` / `ou_…` 等实例标识已做脱敏，替换成自己的实际值即可。
-- `install_deps.bat` 与 `setup.bat` 内写死了作者本机路径，**不要直接双击**，等价命令见 `01` 文档 Step 2。
+- `install_deps.bat` 已自动定位本机 CPython 3.12（原 `setup.bat` 已合并进来），可直接双击运行；等价命令见 `01` 文档 Step 2。
