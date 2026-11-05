@@ -14,6 +14,7 @@
 import os
 import re
 import json
+import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
@@ -24,19 +25,45 @@ PUBLISH_HISTORY = SCRIPT_DIR / ".publish_history.json"
 DEFAULT_TITLE_MAX_LEN = 30
 DEFAULT_DESC_MAX_LEN = 200
 
+# 发布历史上限，防止只增不减导致文件无限膨胀
+MAX_HISTORY = 1000
+
 
 # ── 工具函数（从原 prepare_for_publish.py 迁移） ──
 
 def _load_publish_history():
-    if PUBLISH_HISTORY.exists():
-        with open(PUBLISH_HISTORY, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"published_urls": []}
+    """加载发布历史；文件损坏时降级为空历史并告警，绝不抛异常。"""
+    if not PUBLISH_HISTORY.exists():
+        return {"published_urls": []}
+    try:
+        data = json.loads(PUBLISH_HISTORY.read_text(encoding="utf-8"))
+        urls = data.get("published_urls", [])
+        # 去重保序（历史遗留可能出现重复项）
+        return {"published_urls": list(dict.fromkeys(urls))}
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        print(f"[警告] 发布历史损坏，已降级为空历史: {e}", flush=True)
+        return {"published_urls": []}
 
 
 def _save_publish_history(history):
-    with open(PUBLISH_HISTORY, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    """原子写入：先写临时文件再 os.replace，避免写一半崩溃损坏历史。"""
+    urls = history.get("published_urls", [])
+    # 上限淘汰（保留最新）
+    if len(urls) > MAX_HISTORY:
+        history = {"published_urls": urls[-MAX_HISTORY:]}
+
+    PUBLISH_HISTORY.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        dir=str(PUBLISH_HISTORY.parent), prefix=".history_", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, PUBLISH_HISTORY)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _is_already_published(video_url):

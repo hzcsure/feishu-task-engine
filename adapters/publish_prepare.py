@@ -54,6 +54,9 @@ _ALLOWED_CHARS = re.compile(
     r"]"
 )
 
+# 判定「有效内容字符」：字母、数字、中文。用于识别纯符号标题（清理后仅残留 % 等标点）。
+_VALID_CORE = re.compile(r"[a-zA-Z0-9\u4e00-\u9fff]")
+
 
 def _sanitize_title(title):
     """清理标题：只保留字母数字和指定标点，逗号转空格"""
@@ -66,6 +69,50 @@ def _sanitize_title(title):
     # 合并连续空格
     title = re.sub(r"\s+", " ", title).strip()
     return title
+
+
+def _has_valid_core(text):
+    """判断清理后的标题是否仍含有效内容（字母/数字/中文）。
+
+    用于规避纯符号标题（如 "!@#$%^" 清理后残留 "%"）被当作有效标题。
+    """
+    return bool(_VALID_CORE.search(text or ""))
+
+
+def _build_title(raw_title, video_stem, min_len=6, max_len=16):
+    """组装发布标题（替代原先散落在 prepare_input 中的翻倍填充逻辑）。
+
+    关键差异：
+    1. 空串/纯符号标题不再进入 `while title = title + title` 翻倍循环（空串会死循环）；
+    2. 清理后核心字符为 0 时，回退到文件名 stem，再回退到占位「视频」；
+    3. 过短用「重复末字符」确定性填充，单次完成，无死循环可能；
+    4. 过长截断（先按字符数安全截断，避免切在代理对中间）。
+    """
+    title = _sanitize_title(raw_title or "")
+    source = "raw"
+
+    # 核心字符为 0 → 视为无效（例如 "!@#$%" 清理后残留 "%"，但无实际内容）
+    if not _has_valid_core(title):
+        title = ""
+
+    if not title:
+        stem_title = _sanitize_title((video_stem or "").replace("z_", ""))
+        if _has_valid_core(stem_title):
+            title = stem_title
+            source = "stem"
+        else:
+            title = "视频"
+            source = "fallback"
+
+    # 过短 → 重复末字符填充（确定性、单次完成，无死循环可能）
+    if len(title) < min_len:
+        title = title + title[-1] * (min_len - len(title))
+
+    # 过长 → 截断
+    if len(title) > max_len:
+        title = title[:max_len]
+
+    return title, source
 
 
 def prepare_input(context):
@@ -119,25 +166,9 @@ def prepare_input(context):
     raw_desc = metadata.get("description", "")
     orig_video_url = metadata.get("video_url", "") or video_url
 
-    # 4. 清理标题符号 + 组装（最短6字，最长16字，过短循环填充）
+    # 4. 清理标题符号 + 组装（最短6字，最长16字；确定性填充，无死循环）
     title = fields.get("title", "") or raw_title
-    title = _sanitize_title(title)
-    if title:
-        title = title.strip()
-        # 过短循环填充：如 "AB" → "ABAB" → "ABABABAB"
-        while len(title) < 6:
-            title = title + title
-        # 过长截断
-        if len(title) > 16:
-            title = title[:16]
-    else:
-        # 完全没有标题，从文件名提取
-        title = video_path.stem.replace("z_", "")
-        title = _truncate(title, 16)
-        while len(title) < 6:
-            title = title + title
-        if len(title) > 16:
-            title = title[:16]
+    title, _src = _build_title(title, video_path.stem)
 
     # 5. 组装描述（含 #标签）
     tags = fields.get("tags", "")
@@ -149,7 +180,12 @@ def prepare_input(context):
     # 6. 复制视频到发布目录（保留原始文件名）
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
     publish_video = PUBLISH_DIR / video_path.name
-    shutil.copy2(video_path, publish_video)
+    try:
+        shutil.copy2(video_path, publish_video)
+    except OSError as exc:
+        print(f"  [适配] 复制视频失败: {exc}，跳过本次发布", flush=True)
+        context["skip_publish"] = True
+        return context
 
     # 7. 渲染发布模板
     if not template_file.exists():
@@ -195,8 +231,12 @@ def process_output(stdout, context):
     """
     video_url = context.get("publish_video_url", "")
     if video_url:
-        _mark_as_published(video_url)
-        print(f"  [适配] 视频已标记为已发布", flush=True)
+        try:
+            _mark_as_published(video_url)
+            print(f"  [适配] 视频已标记为已发布", flush=True)
+        except OSError as exc:
+            # 历史文件写失败不应阻断后续清理，仅告警
+            print(f"  [适配] 标记已发布失败: {exc}", flush=True)
 
     # 清理临时数据
     for key in list(context.keys()):

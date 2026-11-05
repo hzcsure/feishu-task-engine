@@ -19,6 +19,7 @@ import time
 import random
 import argparse
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -273,7 +274,7 @@ def decode_qrcodes(image_path: str) -> list:
 
 
 def append_qr_result(cfg: dict, text: str):
-    """将二维码解析结果增量写入 url.txt"""
+    """将二维码解析结果增量写入 url.txt（原子写 + 滚动淘汰）"""
     out_dir = SCRIPT_DIR / cfg.get("qr_output_dir", "二维码解析")
     out_dir.mkdir(parents=True, exist_ok=True)
     file_path = out_dir / "url.txt"
@@ -293,12 +294,23 @@ def append_qr_result(cfg: dict, text: str):
         log(f"  二维码结果已存在，跳过写入: {text[:60]}")
         return
 
+    # 先腾出 1 个空位，再追加（确定性滚动淘汰，保留最新 max_lines 条）
     if len(existing_lines) >= max_lines:
-        delete_count = len(existing_lines) - max_lines + 1
-        existing_lines = existing_lines[delete_count:]
+        existing_lines = existing_lines[-(max_lines - 1):]
 
     existing_lines.append(text)
-    file_path.write_text("\n".join(existing_lines) + "\n", encoding="utf-8")
+
+    # 原子写：临时文件 + os.replace，避免进程中断损坏 url.txt
+    fd, tmp = tempfile.mkstemp(dir=str(out_dir), prefix=".url_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(existing_lines) + "\n")
+        os.replace(tmp, file_path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
     log(f"  二维码结果已写入: {text[:80]}")
 
 

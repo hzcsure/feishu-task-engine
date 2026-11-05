@@ -15,6 +15,7 @@ import sys
 import time
 import json
 import argparse
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -23,6 +24,13 @@ SCRIPT_DIR = Path(__file__).parent
 PROFILE_DIR = SCRIPT_DIR / ".browser_profile"        # Playwright浏览器配置目录
 COOKIES_FILE = SCRIPT_DIR / "youtube_cookies.txt"    # 输出的cookies文件
 YOUTUBE_URL = "https://www.youtube.com"
+
+# 关键 cookie 名清单（更新与检查共用，保证两处一致）
+KEY_COOKIE_NAMES = [
+    "SID", "__Secure-1PSID", "__Secure-3PSID",
+    "SAPISID", "__Secure-1PAPISID", "LOGIN_INFO",
+    "__Secure-1PSIDTS", "__Secure-3PSIDTS",
+]
 
 def _load_proxy():
     """从 yt_config.json 读取代理配置"""
@@ -68,6 +76,20 @@ def cookies_to_netscape(cookies):
         value = c.get("value", "")
         lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
     return "\n".join(lines) + "\n"
+
+
+def _atomic_write_text(path: Path, text: str):
+    """原子写入文本：临时文件 + os.replace，避免写一半损坏文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".cookies_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def run_setup():
@@ -116,7 +138,7 @@ def run_setup():
 
         # 保存
         netscape_text = cookies_to_netscape(youtube_cookies)
-        COOKIES_FILE.write_text(netscape_text, encoding="utf-8")
+        _atomic_write_text(COOKIES_FILE, netscape_text)
         print(f"\n已保存 {len(youtube_cookies)} 个cookie到 {COOKIES_FILE}")
 
         browser.close()
@@ -168,11 +190,10 @@ def run_update(headless=True):
 
         # 保存
         netscape_text = cookies_to_netscape(youtube_cookies)
-        COOKIES_FILE.write_text(netscape_text, encoding="utf-8")
+        _atomic_write_text(COOKIES_FILE, netscape_text)
 
         # 统计关键cookie
-        key_cookies = ["SID", "__Secure-1PSID", "__Secure-3PSID",
-                       "SAPISID", "__Secure-1PAPISID", "LOGIN_INFO"]
+        key_cookies = KEY_COOKIE_NAMES
         found_keys = [c["name"] for c in youtube_cookies if c["name"] in key_cookies]
         missing_keys = [k for k in key_cookies if k not in found_keys]
 
@@ -209,9 +230,7 @@ def run_check():
     session = 0
     earliest_expire = float("inf")
 
-    key_names = ["SID", "__Secure-1PSID", "__Secure-3PSID",
-                 "SAPISID", "__Secure-1PAPISID", "LOGIN_INFO",
-                 "__Secure-1PSIDTS", "__Secure-3PSIDTS"]
+    key_names = KEY_COOKIE_NAMES
     key_status = {}
 
     for line in cookie_lines:
