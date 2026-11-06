@@ -34,8 +34,8 @@ def sanitize_filename(name):
         return "unknown"
     # 空格(含所有空白)替换为下划线
     name = re.sub(r"\s", "_", name)
-    # 只保留 a-zA-Z0-9_
-    name = re.sub(r"[^a-zA-Z0-9_]", "", name)
+    # 只保留 a-zA-Z0-9_ 和中文
+    name = re.sub(r"[^a-zA-Z0-9_\u4e00-\u9fff]", "", name)
     # 合并连续下划线
     name = re.sub(r"_+", "_", name)
     # 去掉首尾下划线
@@ -134,7 +134,7 @@ def build_download_cmd(config, url, output_dir, force=False):
 
     # 文件名清理：空格→下划线，去除非数字字母下划线，合并连续下划线
     cmd += ["--replace-in-metadata", "title", r"\s", "_"]
-    cmd += ["--replace-in-metadata", "title", r"[^a-zA-Z0-9_]", ""]
+    cmd += ["--replace-in-metadata", "title", r"[^a-zA-Z0-9_\u4e00-\u9fff]", ""]
     cmd += ["--replace-in-metadata", "title", r"_+", "_"]
 
     # 并发下载
