@@ -17,6 +17,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# 复用 feishu_send.py 的 node/lark-cli 查找与执行逻辑，避免重复实现导致漂移
+import feishu_send as fs
+
 SCRIPT_DIR = Path(__file__).parent
 
 # ─── 显示样式 ────────────────────────────────────────
@@ -98,86 +101,57 @@ def input_yesno(prompt, default="y"):
 # ══════════════════════════════════════════════════════
 
 def check_lark_cli():
-    """检查 lark-cli 是否可执行"""
-    # 复用 feishu_send.py 的查找策略
-    for name in ["lark-cli.cmd", "lark-cli.exe", "lark-cli"]:
-        rc, out, _ = run_cmd(f"where {name}")
-        if rc == 0 and out:
-            path = out.splitlines()[0]
-            if path.endswith((".cmd", ".exe", ".bat")):
-                return path
+    """检查 lark-cli 是否可执行，返回可执行路径或 None。
 
-    # WorkBuddy managed 路径
-    base = Path.home() / ".workbuddy" / "binaries" / "node" / "cli-connector-packages"
-    for ext in [".cmd", ".exe", ".bat", ""]:
-        candidate = base / f"lark-cli{ext}"
-        if candidate.exists() and ext and candidate.suffix:
-            return str(candidate)
+    复用 feishu_send.find_lark_cli()，并额外校验 node+run.js 是否可用。
+    """
+    path = fs.find_lark_cli()
+    if path and path != "lark-cli":
+        return path
 
-    # 回退：看看 node + run.js 能不能用
-    node_exe = check_node(quiet=True)
-    if node_exe:
-        run_js = base / "node_modules" / "@larksuite" / "cli" / "scripts" / "run.js"
-        if run_js.exists():
-            return f"{node_exe} {run_js} (via node run.js)"
-    return None
+    # find_lark_cli 返回兜底 "lark-cli"（依赖 PATH），进一步确认 node+run.js 方式可用
+    node_exe = fs.get_node_exe()
+    run_js = fs.get_lark_run_js()
+    if node_exe and run_js:
+        return f"{node_exe} {run_js} (via node run.js)"
+    return path if path != "lark-cli" else None
 
 
 def check_lark_auth():
-    """检查 lark-cli 登录状态"""
-    # 先用 node run.js 方式执行 auth status
-    node_exe = check_node(quiet=True)
-    if node_exe:
-        run_js = Path.home() / ".workbuddy" / "binaries" / "node" / \
-            "cli-connector-packages" / "node_modules" / "@larksuite" / "cli" / "scripts" / "run.js"
-        if run_js.exists():
-            rc, out, _ = run_cmd(f'"{node_exe}" "{run_js}" auth status --verify --json')
-            if rc == 0 and out:
-                try:
-                    data = json.loads(out)
-                    return data
-                except json.JSONDecodeError:
-                    pass
-
-    # 回退：用 lark-cli 调用
-    rc, out, _ = run_cmd("lark-cli auth status --verify --json")
-    if rc == 0 and out:
-        try:
-            data = json.loads(out)
-            return data
-        except json.JSONDecodeError:
-            pass
+    """检查 lark-cli 登录状态，复用 feishu_send.run_lark_cli()。"""
+    ok_flag, data = fs.run_lark_cli(["auth", "status", "--verify", "--json"])
+    if ok_flag and isinstance(data, dict) and data.get("identities"):
+        return data
     return None
 
 
 def run_lark_login():
-    """引导用户完成飞书登录（使用交互模式，最稳定）"""
+    """引导用户完成飞书登录（交互模式，继承真实终端以保证 TUI 正常渲染）。
+
+    说明：
+    - 优先走 node run.js 方式（与 feishu_send.run_lark_cli 一致，最稳定）；
+    - 授权范围限定 `--domain im`，避开「方向键选择所有业务域」的全域交互菜单；
+    - 用 subprocess.call 继承 stdin/stdout，而非 os.system/重定向，确保扫码界面可交互。
+    """
     print()
     info("启动飞书授权...\n")
 
-    # 先用 lark-cli 命令，不行就尝试 node run.js
-    cmd = None
-    rc, _, _ = run_cmd("lark-cli --version")
-    if rc == 0:
-        cmd = "lark-cli auth login --recommend"
-    else:
-        node_exe = check_node(quiet=True)
-        if node_exe:
-            run_js = Path.home() / ".workbuddy" / "binaries" / "node" / \
-                "cli-connector-packages" / "node_modules" / "@larksuite" / "cli" / "scripts" / "run.js"
-            if run_js.exists():
-                cmd = f'"{node_exe}" "{run_js}" auth login'
+    node_exe = fs.get_node_exe()
+    run_js = fs.get_lark_run_js()
 
-    if not cmd:
-        fail("无法找到 lark-cli 可执行文件，请先安装 Node.js 后执行: npm install -g @larksuite/cli")
-        return False
+    if node_exe and run_js:
+        cmd = [node_exe, run_js, "auth", "login", "--domain", "im"]
+    else:
+        lark = fs.get_lark_cli()
+        cmd = [lark, "auth", "login", "--domain", "im"]
 
     info("请在打开的交互界面中：\n"
-         "  1. 方向键选择权限域（至少勾选 im）\n"
+         "  1. 确认已勾选 im 权限域\n"
          "  2. 按 Enter 确认\n"
          "  3. 用飞书扫码或浏览器打开链接完成授权\n")
 
-    ret = os.system(cmd)
+    # 继承真实终端（不重定向 stdio），保证 lark-cli 的交互菜单/扫码正常
+    ret = subprocess.call(cmd)
 
     # 等待用户确认后重新检查授权状态
     input("\n  授权完成后，按 Enter 键继续...")
@@ -207,25 +181,12 @@ def run_lark_login():
 # ══════════════════════════════════════════════════════
 
 def check_node(quiet=False):
-    """检查 node 是否可执行，返回路径"""
-    # 优先 WorkBuddy managed
-    base = Path.home() / ".workbuddy" / "binaries" / "node" / "versions"
-    if base.exists():
-        versions = sorted([d for d in base.iterdir() if d.is_dir()], reverse=True)
-        for v in versions:
-            exe = v / "node.exe"
-            if exe.exists():
-                if not quiet:
-                    rc, ver, _ = run_cmd(f'"{exe}" --version')
-                    ok(f"Node.js 已安装 (managed): {ver.strip()}")
-                return str(exe)
-
-    # 系统 PATH
-    rc, ver, _ = run_cmd("node --version")
-    if rc == 0:
+    """检查 node 是否可执行，返回路径。复用 feishu_send.find_node_exe()。"""
+    exe = fs.find_node_exe()
+    if exe:
         if not quiet:
-            ok(f"Node.js 已安装: {ver.strip()}")
-        return "node"
+            ok(f"Node.js 已安装: {exe}")
+        return exe
 
     if not quiet:
         warn("Node.js 未安装，建议从 https://nodejs.org 下载安装")
