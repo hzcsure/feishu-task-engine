@@ -193,7 +193,7 @@ def prepare_input(context):
         context["skip_publish"] = True
         return context
 
-    video_dir_abs = str(PUBLISH_DIR.resolve()).replace("\\", "/") + "/"
+    video_dir_abs = str(PUBLISH_DIR.resolve()) + "\\"
     values = {
         "video_dir": video_dir_abs,
         "video_file": video_path.name,

@@ -38,6 +38,11 @@ from template_matcher import find_text, draw_results
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_WF = os.path.join(SCRIPT_DIR, "wf.json")
 
+# 文件选择对话框等系统弹窗同属目标进程（WeChatAppEx），若被当作主窗口，
+# 会导致截图区域与「窗口→屏幕」坐标换算整体偏移，必须排除。
+DIALOG_CLASS = "#32770"
+DIALOG_TITLES = {"打开", "另存为", "浏览", "选择文件夹", "打开文件"}
+
 
 def load_config(config_path):
     """读取 JSON 配置文件"""
@@ -45,8 +50,23 @@ def load_config(config_path):
         return json.load(f)
 
 
+def is_dialog_window(hwnd):
+    """是否为文件选择对话框一类的系统弹窗（类名 #32770 或常见对话框标题）。"""
+    try:
+        if win32gui.GetClassName(hwnd) == DIALOG_CLASS:
+            return True
+        return win32gui.GetWindowText(hwnd) in DIALOG_TITLES
+    except Exception:
+        return False
+
+
 def find_window_by_process(target_proc):
-    """通过进程名查找对应的可见窗口句柄"""
+    """通过进程名查找主窗口，返回按面积降序的 [(hwnd, title, pid, area)]。
+
+    - 排除文件选择对话框（同属目标进程、类名 #32770、标题「打开」等）；
+    - 按窗口面积降序排列，调用方取 [0] 即主窗口：EnumWindows 的枚举顺序
+      不保证主窗口在前，只按顺序取第一个会偶发选错窗口。
+    """
     found = []
     target_name = target_proc.lower().replace(".exe", "")
 
@@ -56,16 +76,21 @@ def find_window_by_process(target_proc):
         title = win32gui.GetWindowText(hwnd)
         if not title:
             return
+        if is_dialog_window(hwnd):
+            return                      # 跳过文件对话框等弹窗
         try:
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             if psutil.pid_exists(pid):
                 proc_name = psutil.Process(pid).name().lower().replace(".exe", "")
                 if proc_name == target_name:
-                    found.append((hwnd, title, pid))
+                    l, t, r, b = win32gui.GetWindowRect(hwnd)
+                    area = max(0, (r - l) * (b - t))
+                    found.append((hwnd, title, pid, area))
         except Exception:
             pass
 
     win32gui.EnumWindows(callback, None)
+    found.sort(key=lambda it: it[3], reverse=True)
     return found
 
 
@@ -213,8 +238,12 @@ def execute_workflow(config):
         success = False
         return success
 
-    hwnd, title, pid = windows[0]
-    print(f"找到窗口: {title} (句柄 {hwnd}, PID {pid})")
+    hwnd, title, pid, area = windows[0]
+    print(f"找到窗口: {title} (句柄 {hwnd}, PID {pid}, 面积 {area})")
+    if len(windows) > 1:
+        print(f"  同进程另有 {len(windows) - 1} 个窗口，已按面积取最大者")
+        for w in windows[1:]:
+            print(f"    - 忽略: 「{w[1]}」句柄 {w[0]} 面积 {w[3]}")
 
     # 2. 前置并最大化
     print("正在前置并最大化窗口...")
@@ -309,6 +338,58 @@ def execute_workflow(config):
                 success = False
                 return success
 
+        # 4.0b 消失点位：反向门控——等指定元素「消失」后才继续
+        # 适用于「完成信号只能靠"某提示消失"来表达」的场景：
+        # 如封面缩略图生成中的「生成中」消失 = 上传与封面处理真正完成。
+        # 与必要点位方向相反，但同样是内容判据，不依赖坐标。
+        vanish_point = step.get("消失点位", None)
+        if vanish_point:
+            if not isinstance(vanish_point, list) or len(vanish_point) < 1:
+                print(f"  [错误] 消失点位配置格式不正确: {vanish_point}")
+                print("\n" + "=" * 50)
+                print("工作流因消失点位配置错误而终止！")
+                success = False
+                return success
+
+            va_template = vanish_point[0]
+            va_max_retry = vanish_point[1] if len(vanish_point) > 1 else 5
+            va_interval = vanish_point[2] if len(vanish_point) > 2 else 3
+            va_template_path = os.path.join(process_dir, va_template)
+
+            print(f"  消失点位: 模板={va_template}, 最大重试={va_max_retry}, 间隔={va_interval}s")
+
+            if not os.path.exists(va_template_path):
+                print(f"  [错误] 消失点位模板文件不存在: {va_template_path}")
+                print("\n" + "=" * 50)
+                print("工作流因消失点位模板缺失而终止！")
+                success = False
+                return success
+
+            va_count = 0
+            va_start = time.time()
+            while True:
+                # 每次检测都重新截屏，保证看到的是最新画面
+                capture_and_save(hwnd, screenshot_path)
+                va_results = find_text(screenshot_path, va_template_path, threshold=0.8)
+
+                if not va_results:
+                    print(f"  [消失点位] 已消失（第 {va_count + 1} 次检测，"
+                          f"耗时 {time.time() - va_start:.1f}s），继续执行本步骤")
+                    break
+
+                va_count += 1
+                print(f"  [消失点位] 仍存在（置信度 {va_results[0]['置信度']:.4f}），"
+                      f"已等待 {va_count}/{va_max_retry}")
+
+                if va_count > va_max_retry:
+                    print(f"  [消失点位] 重试次数超限({va_count} > {va_max_retry}), 终止脚本")
+                    print("\n" + "=" * 50)
+                    print("工作流因消失点位未消失而终止！")
+                    success = False
+                    return success
+
+                time.sleep(va_interval)
+
         cx, cy = None, None
 
         # 4.1 如果点位图不为空，执行模板匹配
@@ -340,7 +421,10 @@ def execute_workflow(config):
             best = results[0]
             cx, cy = resolve_point(best, select_point)
             print(f"  匹配成功: 左上角{best['左上角']}, 尺寸{best['尺寸']}, 置信度 {best['置信度']:.4f}")
-            print(f"  选点结果: ({cx}, {cy})")
+            # 模板匹配坐标基于「窗口截图」，需加上窗口原点换算为屏幕绝对坐标
+            win_l, win_t, _, _ = win32gui.GetWindowRect(hwnd)
+            cx, cy = cx + win_l, cy + win_t
+            print(f"  选点结果(屏幕): ({cx}, {cy})")
 
             # 移动鼠标到点位
             print(f"  移动鼠标到: ({cx}, {cy})")
@@ -360,6 +444,17 @@ def execute_workflow(config):
             pyautogui.press('enter')
             time.sleep(wait_after)
             print(f"  回车完成，等待 {wait_after}s")
+        elif action == "按键":
+            # 用控件访问键聚焦目标，不依赖任何坐标：如「文件名(N):」→ alt+n
+            keys = str(step.get("按键", "")).strip()
+            parts = [k.strip() for k in keys.split("+") if k.strip()]
+            if not parts:
+                print(f"  [错误] 动作为「按键」但未配置「按键」字段")
+            else:
+                print(f"  执行按键: {keys}")
+                pyautogui.hotkey(*parts)
+                time.sleep(wait_after)
+                print(f"  按键完成，等待 {wait_after}s")
         elif action and cx is None:
             print(f"  [跳过] 无坐标，无法执行动作: {action}")
 
@@ -367,6 +462,9 @@ def execute_workflow(config):
         if text_input:
             print(f"  输入文本: {text_input}")
             pyperclip.copy(text_input)
+            # 先全选再粘贴：避免重复运行时与输入框残留内容叠加（如上次遗留的文件路径）
+            pyautogui.hotkey('ctrl', 'a')
+            time.sleep(0.1)
             pyautogui.hotkey('ctrl', 'v')
             time.sleep(0.3)
             print(f"  文本输入完成")
