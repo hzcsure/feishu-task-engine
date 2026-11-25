@@ -362,6 +362,11 @@ def extract_display_text(msg):
     if msg_type == "sticker":
         return "[表情]"
 
+    if msg_type == "interactive":
+        # 卡片消息：content 是飞书 card JSON 字符串，返回完整原文，
+        # 不做 fallback 截断（卡片内容需要完整传给后续解析）。
+        return content
+
     # 其他类型
     return content if len(content) < 100 else content[:100] + "..."
 

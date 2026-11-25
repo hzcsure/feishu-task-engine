@@ -644,7 +644,9 @@ def handle_message(msg, user_states, task_types, chat_id, self_sender_id=None):
     if self_sender_id and sender_id == self_sender_id:
         return None
 
-    print(f"  [消息] {sender_label}: {text[:60]}")
+    # 完整打印消息内容（多行内容压缩为单行预览，避免日志被换行打断）
+    preview = " ".join(text.split())
+    print(f"  [消息] {sender_label}: {preview}")
 
     # 获取当前用户状态
     state_info = user_states.get(chat_id, {"state": "idle", "context": {}})
