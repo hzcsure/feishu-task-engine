@@ -18,6 +18,7 @@
 import json
 import re
 import shutil
+import sys
 from pathlib import Path
 
 from adapters.yt_download_to_publish import (
@@ -77,6 +78,98 @@ def _has_valid_core(text):
     用于规避纯符号标题（如 "!@#$%^" 清理后残留 "%"）被当作有效标题。
     """
     return bool(_VALID_CORE.search(text or ""))
+
+
+def _extract_subtitle_text(video_path):
+    """查找与视频同 stem 的字幕文件（.vtt/.srt），剥离时间戳与格式标签，返回纯文本。
+
+    yt-dlp 字幕命名：<stem>.<lang>.vtt / <stem>.<lang>.srt（stem 可能带 z_ 前缀或
+    转码处理）。优先 .srt（结构简单），其次 .vtt。找不到返回空串。
+    """
+    if not video_path:
+        return ""
+    stem = video_path.stem
+    if stem.startswith("z_"):
+        stem = stem[2:]
+    candidates = []
+    # 精确匹配：文件名必须严格以 "<stem>." 开头（<stem>.<lang>.vtt/srt）。
+    # 用 Python 字符串前缀判断，而非 glob 通配符，避免 stem 含 [ ] ? * 等
+    # 特殊字符被误解析，也避免误匹配到其他视频（如「猫」≠「小猫」）。
+    prefix = stem + "."
+    for f in DOWNLOADS_DIR.glob("*.vtt"):
+        if f.name.startswith(prefix):
+            candidates.append(f)
+    for f in DOWNLOADS_DIR.glob("*.srt"):
+        if f.name.startswith(prefix):
+            candidates.append(f)
+    # 去重保序，srt 优先
+    seen, ordered = set(), []
+    for f in candidates:
+        if f.name not in seen:
+            seen.add(f.name)
+            ordered.append(f)
+    ordered.sort(key=lambda f: (f.suffix != ".srt", f.name))
+    if not ordered:
+        return ""
+    sub_path = ordered[0]
+    text = sub_path.read_text(encoding="utf-8", errors="replace")
+    return _strip_subtitle(text)
+
+
+def _strip_subtitle(raw):
+    """把 .vtt/.srt 内容剥离成纯文本（去 WEBVTT 头、时间轴、序号、格式标签、重复行）。"""
+    lines = []
+    seen = set()
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("WEBVTT") or line.startswith("Kind:") or line.startswith("Language:"):
+            continue
+        if re.match(r"^\d+$", line):            # srt 序号
+            continue
+        if "-->" in line:                        # 时间轴
+            continue
+        if re.match(r"^NOTE\b", line):           # vtt NOTE 块
+            continue
+        # 去内联标签 <...> 与时间戳 cue 标记
+        line = re.sub(r"<[^>]+>", "", line)
+        line = re.sub(r"\{[^}]*\}", "", line)
+        if line and line not in seen:            # YouTube ASR 常出现连续重复行
+            seen.add(line)
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _summarize_info(info_path, subtitle_text=""):
+    """调用 util/summarize.py 对视频内容做 AI 摘要（两级退避）。
+
+    优先级：字幕纯文本 > info.txt 元数据；均失败/为空时返回空 dict，
+    由调用方走现有正则解析路径。
+    """
+    try:
+        util_dir = Path(__file__).resolve().parent.parent / "util"
+        if str(util_dir) not in sys.path:
+            sys.path.insert(0, str(util_dir))
+        from summarize import summarize_file, summarize_text
+
+        if subtitle_text and subtitle_text.strip():
+            fields = summarize_text(subtitle_text, "video_summary")
+            source = "字幕"
+        elif info_path and Path(info_path).exists():
+            fields = summarize_file(str(info_path), "video_summary")
+            source = "info"
+        else:
+            return {}
+
+        overview = (fields.get("overview") or "").strip()
+        brief = (fields.get("brief") or "").strip()
+        if overview or brief:
+            print(f"  [适配] AI 摘要来源: {source}", flush=True)
+        return {"overview": overview, "brief": brief}
+    except Exception as exc:
+        print(f"  [适配] AI 摘要不可用，回退正则解析: {exc}", flush=True)
+        return {}
 
 
 def _build_title(raw_title, video_stem, min_len=6, max_len=16):
@@ -166,13 +259,22 @@ def prepare_input(context):
     raw_desc = metadata.get("description", "")
     orig_video_url = metadata.get("video_url", "") or video_url
 
+    # 3.1 AI 摘要增强（优先）：字幕纯文本 > info.txt；失败静默回退正则解析
+    subtitle_text = _extract_subtitle_text(video_path)
+    ai = _summarize_info(info_path, subtitle_text)
+    ai_overview = ai.get("overview", "")
+    ai_brief = ai.get("brief", "")
+
     # 4. 清理标题符号 + 组装（最短6字，最长16字；确定性填充，无死循环）
-    title = fields.get("title", "") or raw_title
+    #    brief 优先于正则解析出的 raw_title，但仍过 _build_title 的 6 字最小填充
+    title = fields.get("title", "") or ai_brief or raw_title
     title, _src = _build_title(title, video_path.stem)
 
     # 5. 组装描述（含 #标签）
+    #    overview 优先于正则解析出的 raw_desc
     tags = fields.get("tags", "")
-    description = _build_description(raw_desc, tags)
+    desc_source = ai_overview or raw_desc
+    description = _build_description(desc_source, tags)
     # 描述为空时，回退使用标题字段
     if not description:
         description = title

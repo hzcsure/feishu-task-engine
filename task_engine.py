@@ -632,13 +632,16 @@ def scheduler_loop(data_lock, task_queue):
 # ================================
 # 消息处理
 # ================================
-def handle_message(msg, user_states, task_types, chat_id):
+def handle_message(msg, user_states, task_types, chat_id, self_sender_id=None):
     """处理单条飞书消息"""
     text = fs.extract_display_text(msg)
-    sender_label = fs.format_sender_label(msg)
+    sender_label = fs.format_sender_label(msg, self_sender_id)
+    sender_id = (msg.get("sender") or {}).get("id", "")
 
-    # 忽略自己(BOT)发的消息
-    if sender_label == "BOT":
+    # 只忽略「引擎自己」发的消息（按 sender_id 精确匹配），
+    # 放行其他机器人（如 web_man webhook）与用户消息。
+    # 不能用 sender_label == "BOT" 一刀切，否则会把 web_man 等外部机器人也过滤掉。
+    if self_sender_id and sender_id == self_sender_id:
         return None
 
     print(f"  [消息] {sender_label}: {text[:60]}")
@@ -1034,6 +1037,26 @@ def run_engine(chat_id, task_types, identity="bot"):
         print(f"  启动通知发送异常: {e}", flush=True)
     print(flush=True)
 
+    # 确定「引擎自己」的 sender_id（fushu_CLI 的 app_id），用于精确过滤自身消息。
+    # 启动通知是以 bot 身份发的，其 sender_id 就是引擎自己的 app_id；
+    # 用这个 id 过滤，而不是把所有 app 消息（含 web_man）一刀切忽略。
+    self_sender_id = None
+    try:
+        ok, data = fs.list_messages(chat_id, identity, page_size=10, order="desc")
+        if ok:
+            for msg in data.get("data", {}).get("messages", []):
+                sender = msg.get("sender") or {}
+                if sender.get("sender_type") == "app" and "启动" in fs.extract_display_text(msg):
+                    self_sender_id = sender.get("id", "")
+                    break
+        if self_sender_id:
+            print(f"  引擎自身 sender_id: {self_sender_id}", flush=True)
+        else:
+            print("  [警告] 未能确定引擎自身 sender_id，将退回按 BOT 过滤", flush=True)
+    except Exception as e:
+        print(f"  [警告] 确定自身 sender_id 失败: {e}", flush=True)
+    print(flush=True)
+
     # 主循环
     poll_interval = 3
     while True:
@@ -1061,7 +1084,7 @@ def run_engine(chat_id, task_types, identity="bot"):
                     new_msgs.sort(key=lambda m: m.get("create_time", ""))
                     for msg in new_msgs:
                         try:
-                            handle_message(msg, user_states, task_types, chat_id)
+                            handle_message(msg, user_states, task_types, chat_id, self_sender_id)
                         except Exception as e:
                             print(f"  [处理消息异常] {e}")
 

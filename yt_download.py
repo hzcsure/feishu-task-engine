@@ -28,6 +28,18 @@ DEFAULT_CONFIG = SCRIPT_DIR / "yt_config.json"
 # ================================
 
 
+def _clean_env():
+    """返回一份清空 NODE_OPTIONS 的环境，供 subprocess 使用。
+
+    WorkBuddy 沙箱会通过 NODE_OPTIONS 注入 node-language-shim.cjs，
+    导致 yt-dlp 用 node 解 n-challenge 时报 ERR_ACCESS_DENIED。
+    清空后 node 子进程可干净运行。
+    """
+    env = os.environ.copy()
+    env.pop("NODE_OPTIONS", None)
+    return env
+
+
 def sanitize_filename(name):
     """清理文件名：空格→下划线，只保留数字/字母/下划线，合并连续下划线"""
     if not name:
@@ -162,9 +174,14 @@ def build_download_cmd(config, url, output_dir, force=False):
     # 字幕
     sub_cfg = config.get("字幕", {})
     if sub_cfg.get("启用", False):
-        langs = sub_cfg.get("语言", ["en"])
-        for lang in langs:
-            cmd += ["--write-subs", "--sub-langs", lang]
+        langs = sub_cfg.get("语言", [])
+        if langs:
+            # 指定语言时，逐个追加 --sub-langs
+            for lang in langs:
+                cmd += ["--write-subs", "--sub-langs", lang]
+        else:
+            # 不指定语言 → 按视频原声语言下字幕（yt-dlp 默认行为）
+            cmd += ["--write-subs"]
         if sub_cfg.get("自动生成", True):
             cmd += ["--write-auto-subs"]
         if sub_cfg.get("嵌入视频", True):
@@ -185,7 +202,7 @@ def get_video_info(config, url):
     cmd += ["--dump-json", "--no-playlist", url]
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=_clean_env())
         stdout, _ = proc.communicate(timeout=60)
         if proc.returncode == 0 and stdout:
             text = stdout.decode("utf-8", errors="replace").strip()
@@ -424,11 +441,11 @@ def extract_audio(config, video_path, output_dir):
 
     # 先尝试流拷贝（无损、快速）
     cmd = [ffmpeg, "-i", str(video_path), "-vn", "-acodec", "copy", "-y", str(audio_path)]
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, env=_clean_env())
     if result.returncode != 0:
         # 流拷贝失败，重新编码
         cmd = [ffmpeg, "-i", str(video_path), "-vn", "-y", str(audio_path)]
-        result = subprocess.run(cmd, capture_output=True)
+        result = subprocess.run(cmd, capture_output=True, env=_clean_env())
 
     if audio_path.exists() and audio_path.stat().st_size > 0:
         size = format_filesize(audio_path.stat().st_size)
@@ -466,12 +483,12 @@ def transcode_to_mp4(config, video_path, output_dir):
     print(f"  正在转码: {video_path.name} -> {mp4_path.name}")
     # 先尝试流拷贝（如果编码兼容，速度快）
     cmd = [ffmpeg, "-i", str(video_path), "-c", "copy", "-y", str(mp4_path)]
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, env=_clean_env())
     if result.returncode != 0:
         # 流拷贝失败，重新编码为H.264+AAC
         print(f"  流拷贝失败，重新编码 (H.264+AAC)...")
         cmd = [ffmpeg, "-i", str(video_path), "-c:v", "libx264", "-c:a", "aac", "-y", str(mp4_path)]
-        result = subprocess.run(cmd, capture_output=True)
+        result = subprocess.run(cmd, capture_output=True, env=_clean_env())
 
     if mp4_path.exists() and mp4_path.stat().st_size > 0:
         size = format_filesize(mp4_path.stat().st_size)
@@ -541,7 +558,7 @@ def download_video(config, url, output_dir, force=False):
     print("-" * 60)
 
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env=_clean_env())
         success = result.returncode == 0
     except KeyboardInterrupt:
         print("\n用户中断下载，已保存断点，可重新运行续传")
@@ -589,7 +606,7 @@ def show_formats(config, url):
     print(f"正在获取格式列表: {url}")
     cmd = build_base_cmd(config)
     cmd += ["--list-formats", "--no-playlist", url]
-    subprocess.run(cmd)
+    subprocess.run(cmd, env=_clean_env())
 
 
 def show_info(config, url):

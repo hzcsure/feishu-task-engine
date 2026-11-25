@@ -377,7 +377,8 @@ def format_sender_label(msg, my_sender_id=None):
         return "我"
 
     if sender_type == "app":
-        return "BOT"
+        # 非自己的机器人（如 web_man webhook）：带上 id 前缀以便区分不同机器人
+        return f"Bot({sender_id[:8]})" if sender_id else "BOT"
     elif sender_type == "user":
         # 尝试取 sender_name (lark-cli 有时会自动 enrich)
         name = sender.get("sender_name", sender.get("name", ""))
